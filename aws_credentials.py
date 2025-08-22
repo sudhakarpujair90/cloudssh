@@ -2,6 +2,7 @@ import os
 import json
 import boto3
 import stat
+from secure_storage import encrypt_file, decrypt_file
 
 CONFIG_FILE = "aws_config.json"
 PEM_DIR = "pem_keys"
@@ -61,7 +62,7 @@ def delete_aws_key():
         deleted = accounts[idx]
         confirm = input(f"Are you sure you want to delete AWS account '{deleted['name']}'? (y/n): ").strip().lower()
         if confirm != "y":
-            print("❌ Deletion cancelled. Returning to previous menu...")
+            print("❌ Deletion cancelled.")
             return
 
         accounts.pop(idx)
@@ -70,7 +71,7 @@ def delete_aws_key():
         save_config(config)
         print(f"✅ Deleted AWS account: {deleted['name']}")
     except:
-        print("❌ Invalid selection. Returning to previous menu...")
+        print("❌ Invalid selection.")
 
 # ---------- PEM KEYS ----------
 def list_pem_keys():
@@ -85,6 +86,7 @@ def list_pem_keys():
     return pem_keys
 
 def add_pem_key():
+    from secure_storage import encrypt_file
     config = load_config()
     if not config.get("accounts"):
         print("⚠️ No AWS accounts found. Please add AWS keys first.")
@@ -137,32 +139,29 @@ def add_pem_key():
         lines.append(line)
     pem_content = "\n".join(lines)
 
-    # Save / Cancel prompt
-    while True:
-        print("\nDo you want to save this PEM key?")
-        print("1. Save")
-        print("2. Cancel")
-        save_choice = input("Enter choice: ").strip()
-        if save_choice == "1":
-            if not os.path.exists(PEM_DIR):
-                os.makedirs(PEM_DIR)
-            pem_path = os.path.join(PEM_DIR, f"{key_pair_name}.pem")
-            with open(pem_path, "w") as f:
-                f.write(pem_content)
-            os.chmod(pem_path, 0o400)  # chmod 400
-            config.setdefault("pem_keys", []).append({
-                "account": account["name"],
-                "key_pair": key_pair_name,
-                "path": pem_path
-            })
-            save_config(config)
-            print(f"✅ PEM key saved at {pem_path} with chmod 400")
-            break
-        elif save_choice == "2":
-            print("❌ PEM key addition cancelled.")
-            break
-        else:
-            print("❌ Invalid choice. Please select 1 or 2.")
+    # Encrypt before saving
+    if not os.path.exists(PEM_DIR):
+        os.makedirs(PEM_DIR)
+    pem_path_plain = os.path.join(PEM_DIR, f"{key_pair_name}.pem")
+    pem_path_enc = pem_path_plain + ".enc"
+
+    # Write plain temporarily
+    with open(pem_path_plain, "w") as f:
+        f.write(pem_content)
+
+    # Encrypt the file
+    encrypt_file(pem_path_plain, pem_path_enc)
+    # Remove plain file
+    os.remove(pem_path_plain)
+
+    # Save metadata
+    config.setdefault("pem_keys", []).append({
+        "account": account["name"],
+        "key_pair": key_pair_name,
+        "path": pem_path_enc
+    })
+    save_config(config)
+    print(f"✅ PEM key saved and encrypted at {pem_path_enc}")
 
 def delete_pem_key():
     pem_keys = list_pem_keys()
@@ -176,7 +175,7 @@ def delete_pem_key():
         deleted = pem_keys[idx]
         confirm = input(f"Are you sure you want to delete PEM key '{deleted['key_pair']}' for account '{deleted['account']}'? (y/n): ").strip().lower()
         if confirm != "y":
-            print("❌ Deletion cancelled. Returning to previous menu...")
+            print("❌ Deletion cancelled.")
             return
 
         pem_keys.pop(idx)
@@ -187,7 +186,7 @@ def delete_pem_key():
             os.remove(deleted["path"])
         print(f"✅ Deleted PEM key: {deleted['key_pair']} for account {deleted['account']}")
     except:
-        print("❌ Invalid selection. Returning to previous menu...")
+        print("❌ Invalid selection.")
 
 # ---------- AWS KEYS MENU ----------
 def aws_keys_menu():
